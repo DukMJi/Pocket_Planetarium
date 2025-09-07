@@ -1,0 +1,11 @@
+# Build
+build/
+*.o
+*.out
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
