@@ -2,7 +2,7 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 
-// Draws ASCII text onto the renderer w/ SDL_tff font
+// Draws ASCII text onto the renderer w/ SDL_ttf font
 static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x, int y)
 {
 	SDL_Color white = {255,255,255,255};
@@ -16,6 +16,28 @@ static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x
 		SDL_DestroyTexture(tex);
 	}
 	SDL_FreeSurface(surf);
+}
+
+static TTF_Font* open_font(int ptsize)
+{
+	const char* candidates[] = {
+		"fonts/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+		"/System/Library/Fonts/Supplemental/Menlo.ttc",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf"
+	};
+
+	for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); ++i)
+	{
+		TTF_Font* f = TTF_OpenFont(candidates[i], ptsize);
+		if (f)
+		{
+			printf("Loaded font: %s\n", candidates[i]);
+			return f;
+		}
+	}
+	return NULL;
 }
 
 int main(void)
@@ -59,11 +81,10 @@ int main(void)
 		return 1;
 	}
 
-	// Opens TrueType font w/ Mac system path
-	TTF_Font* font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Courier New.ttf", 24);
+	TTF_Font* font = open_font(24);
 	if (!font)
 	{
-		fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());
+		fprintf(stderr, "No usable font found! %s\n", TTF_GetError());
 		SDL_DestroyRenderer(ren);
 		SDL_DestroyWindow(w);
 		TTF_Quit();
@@ -121,6 +142,8 @@ int main(void)
 
 		// Rendering begins
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
+		SDL_RenderClear(ren);
+
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
 		SDL_RenderDrawLine(ren, 400 - 40, 240, 400 + 40, 240);
 		SDL_RenderDrawLine(ren, 400, 240 - 40, 400, 240 + 40);
