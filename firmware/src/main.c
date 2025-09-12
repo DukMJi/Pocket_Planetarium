@@ -2,6 +2,7 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 
+// Draws ASCII text onto the renderer w/ SDL_tff font
 static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x, int y)
 {
 	SDL_Color white = {255,255,255,255};
@@ -19,16 +20,14 @@ static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x
 
 int main(void)
 {
-
-
-	// For SDL video
+	// Initialize video, creates drivers/resources
 	if (SDL_Init(SDL_INIT_VIDEO) != 0)
 	{
 		fprintf(stderr,"SDL_Init %s\n",SDL_GetError());
 		return 1;
 	}
 
-	// SDL_ttf for text
+	// SDL_ttf for text (font engine)
 	if (TTF_Init() != 0)
 	{
 		fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
@@ -36,6 +35,7 @@ int main(void)
 		return 1;
 	}
 
+	// Creates window, 800 x 480 pixels
 	SDL_Window* w = SDL_CreateWindow("Pocket Planetarium", SDL_WINDOWPOS_CENTERED, 
 		SDL_WINDOWPOS_CENTERED, 
 		800, 480, 0);
@@ -48,6 +48,7 @@ int main(void)
 		return 1;
 	}
 
+	// Creates hardware-accelerated renderer
 	SDL_Renderer* ren = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED);
 	if (!ren)
 	{
@@ -58,6 +59,7 @@ int main(void)
 		return 1;
 	}
 
+	// Opens TrueType font w/ Mac system path
 	TTF_Font* font = TTF_OpenFont("/System/Library/Fonts/Supplemental/Courier New.ttf", 24);
 	if (!font)
 	{
@@ -69,33 +71,35 @@ int main(void)
 		return 1;
 	}
 
-	// Simulated IMu state
+	// Simulated IMU state, angles in degrees
 	float yaw=0.f, pitch=0.f, roll=0.f;
 	Uint32 last = SDL_GetTicks();
 
-	// FPS
+	// FPS tracking values (.5s)
 	float fps = 0.f; Uint32 fpsLast = last; int frames=0;
 
-	SDL_Event e;
+	SDL_Event e; // Event object (keyboard, quit, etc)
 	int running = 1;
 
 	while (running)
 	{
+		// Handles pending events
 		while (SDL_PollEvent(&e))
 		{
-			if (e.type == SDL_QUIT)
+			if (e.type == SDL_QUIT) // window close
 			{
-				running = 0;
+				running = 0; 
 			}
-
+			// ESC
 			if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)
 			{
 				running = 0;
 			}
 		}
 
+		// Time step (seconds) since last frame
 		Uint32 now = SDL_GetTicks();
-		float dt = (now - last) / 1000.0f; //seconds
+		float dt = (now - last) / 1000.0f; // seconds
 		last = now;
 
 		// Animate fake IMU
@@ -115,7 +119,7 @@ int main(void)
 			fpsLast = now;
 		}
 
-		// background
+		// Rendering begins
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
 		SDL_RenderDrawLine(ren, 400 - 40, 240, 400 + 40, 240);
