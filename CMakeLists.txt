@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(pocket_planetarium C)
-set(CMAKE_C_STANDARD 11)
+project(Pocket_Planetarium C)
 
-# Tell CMake to also process the firmware folder
+# Tell CMake to build everything inside the firmware directory
 add_subdirectory(firmware)

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include "imu.h"
 
 // Draws ASCII text onto the renderer w/ SDL_ttf font
 static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x, int y)
@@ -96,6 +97,8 @@ int main(void)
 	float yaw=0.f, pitch=0.f, roll=0.f;
 	Uint32 last = SDL_GetTicks();
 
+	imu_data_t imu;
+
 	// FPS tracking values (.5s)
 	float fps = 0.f; Uint32 fpsLast = last; int frames=0;
 
@@ -124,12 +127,21 @@ int main(void)
 		last = now;
 
 		// Animate fake IMU
-		yaw += 30.f * dt;
-		pitch += 20.f * dt;
-		roll += 15.f * dt;
-		if (yaw>360) yaw-=360;
-		if (pitch>360) pitch-=360;
-		if (roll>360) roll-=360;
+		if (imu_read(&imu) == 0)
+		{
+			yaw = imu.yaw;
+			pitch = imu.pitch;
+			roll = imu.roll;
+		}
+		else
+		{
+			yaw += 30.f * dt;
+			pitch += 20.f * dt;
+			roll += 15.f * dt;
+			if (yaw>360) yaw-=360;
+			if (pitch>360) pitch-=360;
+			if (roll>360) roll-=360;
+		}
 
 		// FPS calculated
 		frames++;
@@ -162,5 +174,6 @@ int main(void)
 	TTF_Quit();
 	SDL_Quit();
 
+	imu_close();
 	return 0;
 }
