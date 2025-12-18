@@ -15,4 +15,5 @@ target_include_directories(pocket_planetarium PRIVATE
 target_link_libraries(pocket_planetarium PRIVATE
     SDL2::SDL2
     SDL2_ttf::SDL2_ttf
+    m
 )
