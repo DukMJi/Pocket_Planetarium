@@ -3,12 +3,22 @@
 #include <SDL_ttf.h>
 #include "imu.h"
 
-// Draws ASCII text onto the renderer w/ SDL_ttf font
+/*
+ * Helper Function to render ASCII text to SDL renderer using SDL_tff.
+ * Converts a string to a surface, then to a texture, and finally
+ * copies it to the renderer at specified screen position.
+ * 
+ * Also kept separate from main render loop to avoid clutter.
+ */
 static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x, int y)
 {
 	SDL_Color white = {255,255,255,255};
+
+	// Renders text into intermediate surface.
 	SDL_Surface* surf = TTF_RenderText_Solid(font, msg, white);
 	if (!surf) return;
+
+	// Converts surface to GPU texture.
 	SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
 	if (tex)
 	{
@@ -19,6 +29,11 @@ static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x
 	SDL_FreeSurface(surf);
 }
 
+/*
+ * Attemps to open a font from several known locations.
+ * This allows the same binary to work across macOS and Linux
+ * without hard-coding a single font path.
+ */
 static TTF_Font* open_font(int ptsize)
 {
 	const char* candidates[] = {
@@ -43,14 +58,15 @@ static TTF_Font* open_font(int ptsize)
 
 int main(void)
 {
-	// Initialize video, creates drivers/resources
+	// Initialize SDL video subsystem.
+	// This sets up graphic drivers and windowing.
 	if (SDL_Init(SDL_INIT_VIDEO) != 0)
 	{
 		fprintf(stderr,"SDL_Init %s\n",SDL_GetError());
 		return 1;
 	}
 
-	// SDL_ttf for text (font engine)
+	// Initiailize SDL_tff for TrueType font rendering.
 	if (TTF_Init() != 0)
 	{
 		fprintf(stderr, "TTF_Init: %s\n", TTF_GetError());
@@ -58,7 +74,8 @@ int main(void)
 		return 1;
 	}
 
-	// Creates window, 800 x 480 pixels
+	// Create the main application window.
+	// Resolution matches the target handheld display (800x480).
 	SDL_Window* w = SDL_CreateWindow("Pocket Planetarium", SDL_WINDOWPOS_CENTERED, 
 		SDL_WINDOWPOS_CENTERED, 
 		800, 480, 0);
@@ -71,7 +88,7 @@ int main(void)
 		return 1;
 	}
 
-	// Creates hardware-accelerated renderer
+	// Creates a hardware-accelerated renderer for drawing.
 	SDL_Renderer* ren = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED);
 	if (!ren)
 	{
@@ -82,6 +99,7 @@ int main(void)
 		return 1;
 	}
 
+	// Load a font for on-screen diagnostics (angles, FPS).
 	TTF_Font* font = open_font(24);
 	if (!font)
 	{
@@ -93,21 +111,24 @@ int main(void)
 		return 1;
 	}
 
-	// Simulated IMU state, angles in degrees
+	// Orientation values come from IMU when available.
 	float yaw=0.f, pitch=0.f, roll=0.f;
+
+	// Timing reference for frame delta calculation.
 	Uint32 last = SDL_GetTicks();
 
+	// IMU data structure (filled by imu_read).
 	imu_data_t imu;
 
-	// FPS tracking values (.5s)
+	// FPS tracking variables (.5s)
 	float fps = 0.f; Uint32 fpsLast = last; int frames=0;
 
 	SDL_Event e; // Event object (keyboard, quit, etc)
 	int running = 1;
 
-	while (running)
+	while (running)	// Main application loop
 	{
-		// Handles pending events
+		// Handles user input and window events.
 		while (SDL_PollEvent(&e))
 		{
 			if (e.type == SDL_QUIT) // window close
@@ -121,12 +142,12 @@ int main(void)
 			}
 		}
 
-		// Time step (seconds) since last frame
+		// Calculate frame delta time (seconds).
 		Uint32 now = SDL_GetTicks();
-		float dt = (now - last) / 1000.0f; // seconds
+		float dt = (now - last) / 1000.0f;
 		last = now;
 
-		// Animate fake IMU
+		// Attempt to read from IMU.
 		if (imu_read(&imu) == 0)
 		{
 			yaw = imu.yaw;
@@ -152,22 +173,25 @@ int main(void)
 			fpsLast = now;
 		}
 
-		// Rendering begins
+		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
 
+		// Crosshair centered on screen.
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
 		SDL_RenderDrawLine(ren, 400 - 40, 240, 400 + 40, 240);
 		SDL_RenderDrawLine(ren, 400, 240 - 40, 400, 240 + 40);
 
+		// Diagnostic overlay.
 		char buf[128];
 		snprintf(buf, sizeof(buf), "Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS:%.1f", yaw, pitch, roll, fps);
 		renderText(ren, font, buf, 20, 20);
 
 		SDL_RenderPresent(ren);
-		SDL_Delay(1); 
+		SDL_Delay(1); // Delay to avoid maxing out CPU.
 	}
 
+	// Cleanup resources.
 	TTF_CloseFont(font);
 	SDL_DestroyRenderer(ren);
 	SDL_DestroyWindow(w);
