@@ -101,6 +101,7 @@ int main(void)
 
 	// Load a font for on-screen diagnostics (angles, FPS).
 	TTF_Font* font = open_font(24);
+
 	if (!font)
 	{
 		fprintf(stderr, "No usable font found! %s\n", TTF_GetError());
@@ -111,17 +112,23 @@ int main(void)
 		return 1;
 	}
 
+	// Tries to initialize the IMU once.
+	// If it fails, fall back to SIM mode automatically.
+	int imu_ok = (imu_init() == 0);
+
+	// Press 'S' to force SIM mode even if IMU works (for demo/testing)).
+	int force_sim = 0;
+
 	// Orientation values come from IMU when available.
-	float yaw=0.f, pitch=0.f, roll=0.f;
+	float yaw = 0.f, pitch = 0.f, roll = 0.f;
 
 	// Timing reference for frame delta calculation.
 	Uint32 last = SDL_GetTicks();
 
-	// IMU data structure (filled by imu_read).
-	imu_data_t imu;
-
 	// FPS tracking variables (.5s)
-	float fps = 0.f; Uint32 fpsLast = last; int frames=0;
+	float fps = 0.f;
+	Uint32 fpsLast = last;
+	int frames = 0;
 
 	SDL_Event e; // Event object (keyboard, quit, etc)
 	int running = 1;
@@ -140,6 +147,12 @@ int main(void)
 			{
 				running = 0;
 			}
+
+			// Toggle SIM mode with 'S'
+			if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_s)
+			{
+				force_sim = !force_sim;
+			}
 		}
 
 		// Calculate frame delta time (seconds).
@@ -147,8 +160,10 @@ int main(void)
 		float dt = (now - last) / 1000.0f;
 		last = now;
 
+		imu_data_t imu;
+
 		// Attempt to read from IMU.
-		if (imu_read(&imu) == 0)
+		if (!force_sim && imu_ok && imu_read(&imu) == 0)
 		{
 			yaw = imu.yaw;
 			pitch = imu.pitch;
@@ -156,12 +171,11 @@ int main(void)
 		}
 		else
 		{
-			yaw += 30.f * dt;
-			pitch += 20.f * dt;
-			roll += 15.f * dt;
-			if (yaw>360) yaw-=360;
-			if (pitch>360) pitch-=360;
-			if (roll>360) roll-=360;
+			// SIM fallback
+			imu_sim_step(&imu, dt);
+			yaw = imu.yaw;
+			pitch = imu.pitch;
+			roll = imu.roll;
 		}
 
 		// FPS calculated
@@ -184,7 +198,10 @@ int main(void)
 
 		// Diagnostic overlay.
 		char buf[128];
-		snprintf(buf, sizeof(buf), "Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS:%.1f", yaw, pitch, roll, fps);
+		snprintf(buf, sizeof(buf),
+        		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS: %.1f  MODE:%s",
+         		yaw, pitch, roll, fps, (force_sim || !imu_ok) ? "SIM" : "IMU");
+
 		renderText(ren, font, buf, 20, 20);
 
 		SDL_RenderPresent(ren);

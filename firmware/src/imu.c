@@ -3,8 +3,8 @@
 #include <stdio.h>
 
 /*
- * Linuc builds (Raspberry Pi) use real I2C access.
- * Non-Linux builds (maxOS) compile stubbed versions
+ * Linux builds (Raspberry Pi) use real I2C access.
+ * Non-Linux builds (macOS) compile stubbed versions
  * so development can continue without hardware.
  */
 #ifdef __linux__
@@ -13,14 +13,11 @@
     #include <sys/ioctl.h>
     #include <linux/i2c-dev.h>
     #include <math.h>
-#else
-    // macOS / non-Linux: no I2C available.
-    #include <math.h>
 #endif
 
 /*
  * MPU6050 register definitions.
- * These values come form the MPU6050 datasheet
+ * These values come from the MPU6050 datasheet
  * */
 #define MPU6050_ADDR         0x68
 #define MPU6050_PWR_MGMT_1   0x6B
@@ -83,7 +80,7 @@ int imu_init(void)
  *  Derived from accelerometer using trigonometry.
  * 
  * Yaw:
- *  Currently a palceholder derived from gyro Z-axis.
+ *  Currently a placeholder derived from gyro Z-axis.
  */
 int imu_read(imu_data_t *d)
 {
@@ -149,4 +146,25 @@ void imu_close(void)
         i2c_fd = -1;
     }
 #endif
+}
+
+void imu_sim_step(imu_data_t *d, float dt)
+{
+    static float yaw = 0.f;
+    static float pitch = 0.f;
+    static float roll = 0.f;
+
+    if (!d) return;
+
+    yaw += 30.f * dt;
+    pitch += 20.f * dt;
+    roll += 15.f * dt;
+
+    if (yaw > 360.f)    yaw -= 360.f;
+    if (pitch > 360.f)  pitch -= 360.f;
+    if (roll > 360.f)   roll -= 360.f;
+
+    d->yaw = yaw;
+    d->pitch = pitch;
+    d->roll = roll;
 }
