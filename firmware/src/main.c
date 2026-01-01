@@ -2,6 +2,68 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include "imu.h"
+#include <math.h>
+#include "stars.h"
+
+typedef struct {
+	float x, y, z;
+}vec3;
+
+static vec3 rot_yaw_pitch_roll(vec3 v, float yaw_deg, float pitch_deg, float roll_deg)
+{
+    float yaw   = yaw_deg   * (float)M_PI / 180.0f;
+    float pitch = pitch_deg * (float)M_PI / 180.0f;
+    float roll  = roll_deg  * (float)M_PI / 180.0f;
+
+    // Yaw (Z axis)
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float x1 = v.x * cy - v.y * sy;
+    float y1 = v.x * sy + v.y * cy;
+    float z1 = v.z;
+
+    // Pitch (X axis)
+    float cp = cosf(pitch), sp = sinf(pitch);
+    float x2 = x1;
+    float y2 = y1 * cp - z1 * sp;
+    float z2 = y1 * sp + z1 * cp;
+
+    // Roll (Y axis)
+    float cr = cosf(roll), sr = sinf(roll);
+    float x3 = x2 * cr + z2 * sr;
+    float y3 = y2;
+    float z3 = -x2 * sr + z2 * cr;
+
+    vec3 out = { x3, y3, z3 };
+    return out;
+}
+
+static int project_to_screen(vec3 v, int w, int h, int *sx, int *sy)
+{
+	// Only draw things "in front" of the camera
+	if (v.z <= 0.05f)
+	{
+		return 0;
+	}
+
+	float fov = 1.0f;
+	float px = (v.x / v.z) * fov;
+	float py = (v.y / v.z) * fov;
+
+	*sx = (int)(w * 0.5f + px * (w * 0.5f));
+	*sy = (int)(h * 0.5f - py * (h * 0.5f));
+	return 1;
+
+}
+
+static const vec3 STARS[] = {
+    { 0.2f,  0.1f,  1.0f},
+    {-0.3f,  0.2f,  1.2f},
+    { 0.1f, -0.4f,  1.1f},
+    { 0.6f, -0.1f,  1.5f},
+    {-0.5f, -0.3f,  1.4f},
+    { 0.0f,  0.5f,  1.3f},
+};
+static const int STAR_COUNT = (int)(sizeof(STARS)/sizeof(STARS[0]));
 
 /*
  * Helper Function to render ASCII text to SDL renderer using SDL_tff.
@@ -112,6 +174,16 @@ int main(void)
 		return 1;
 	}
 
+	// Load star catalog
+	star_catalog_t catalog;
+	if (stars_load_csv(&catalog, "firmware/assets/stars.csv") != 0)
+	{
+		// Fall back if running from inside firmware/build
+		stars_load_csv(&catalog, "assets/stars.csv");
+	}
+
+	printf("Loaded %zu stars\n", catalog.count);
+
 	// Tries to initialize the IMU once.
 	// If it fails, fall back to SIM mode automatically.
 	int imu_ok = (imu_init() == 0);
@@ -190,6 +262,25 @@ int main(void)
 		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
+		SDL_SetRenderDrawColor(ren, 225, 225, 225, 225);
+
+		int W = 800, H = 400;
+
+		// draw stars
+		for (int i = 0; i < STAR_COUNT; i++)
+		{
+			vec3 v = STARS[i];
+
+			// rotate star field by current orientation
+			vec3 vr = v;
+
+			int sx, sy;
+			if (project_to_screen(vr, W, H, &sx, &sy))
+			{
+				// Simple point
+				SDL_RenderDrawPoint(ren, sx, sy);
+			}
+		}
 
 		// Crosshair centered on screen.
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
@@ -199,8 +290,8 @@ int main(void)
 		// Diagnostic overlay.
 		char buf[128];
 		snprintf(buf, sizeof(buf),
-        		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS: %.1f  MODE:%s",
-         		yaw, pitch, roll, fps, (force_sim || !imu_ok) ? "SIM" : "IMU");
+        		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS: %.1f  MODE:%s Stars:%zu",
+         		yaw, pitch, roll, fps, (force_sim || !imu_ok) ? "SIM" : "IMU", catalog.count);
 
 		renderText(ren, font, buf, 20, 20);
 
@@ -216,5 +307,6 @@ int main(void)
 	SDL_Quit();
 
 	imu_close();
+	stars_free(&catalog);
 	return 0;
 }

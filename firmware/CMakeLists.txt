@@ -6,6 +6,7 @@ find_package(SDL2_ttf REQUIRED CONFIG)
 add_executable(pocket_planetarium
     src/main.c
     src/imu.c
+    src/stars.c
 )
 
 target_include_directories(pocket_planetarium PRIVATE
