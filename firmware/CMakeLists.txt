@@ -7,6 +7,7 @@ add_executable(pocket_planetarium
     src/main.c
     src/imu.c
     src/stars.c
+    src/astro.c
 )
 
 target_include_directories(pocket_planetarium PRIVATE
@@ -17,4 +18,12 @@ target_link_libraries(pocket_planetarium PRIVATE
     SDL2::SDL2
     SDL2_ttf::SDL2_ttf
     m
+)
+
+add_custom_command(TARGET pocket_planetarium POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            $<TARGET_FILE_DIR:pocket_planetarium>/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/stars.csv
+            $<TARGET_FILE_DIR:pocket_planetarium>/assets/stars.csv
 )

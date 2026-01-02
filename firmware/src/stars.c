@@ -23,7 +23,7 @@ int stars_load_csv(star_catalog_t *cat, const char *path)
     if (!fp)
     {
         perror("fopen stars csv");
-        return 01;
+        return -1;
     }
 
     size_t cap = 0;

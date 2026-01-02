@@ -4,6 +4,7 @@
 #include "imu.h"
 #include <math.h>
 #include "stars.h"
+#include "astro.h"
 
 typedef struct {
 	float x, y, z;
@@ -178,8 +179,13 @@ int main(void)
 	star_catalog_t catalog;
 	if (stars_load_csv(&catalog, "firmware/assets/stars.csv") != 0)
 	{
-		// Fall back if running from inside firmware/build
-		stars_load_csv(&catalog, "assets/stars.csv");
+		fprintf(stderr, "Failed to load stars CSV\n");
+		TTF_CloseFont(font);
+		SDL_DestroyRenderer(ren);
+		SDL_DestroyWindow(w);
+		TTF_Quit();
+		SDL_Quit();
+		return 1;
 	}
 
 	printf("Loaded %zu stars\n", catalog.count);
@@ -205,6 +211,7 @@ int main(void)
 	SDL_Event e; // Event object (keyboard, quit, etc)
 	int running = 1;
 
+	imu_data_t imu;
 	while (running)	// Main application loop
 	{
 		// Handles user input and window events.
@@ -232,8 +239,6 @@ int main(void)
 		float dt = (now - last) / 1000.0f;
 		last = now;
 
-		imu_data_t imu;
-
 		// Attempt to read from IMU.
 		if (!force_sim && imu_ok && imu_read(&imu) == 0)
 		{
@@ -250,6 +255,12 @@ int main(void)
 			roll = imu.roll;
 		}
 
+		float rx, ry, rz, ux, uy, uz, fx, fy, fz;
+		astro_camera_basis(yaw, pitch, roll,
+						&rx, &ry, &rz,
+						&ux, &uy, &uz,
+						&fx, &fy, &fz);
+
 		// FPS calculated
 		frames++;
 		if (now - fpsLast >= 500)
@@ -262,9 +273,32 @@ int main(void)
 		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
-		SDL_SetRenderDrawColor(ren, 225, 225, 225, 225);
 
-		int W = 800, H = 400;
+		const int W = 800;
+		const int H = 480;
+		const float FOV = 70.0f;
+		SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+
+		for (size_t i = 0; i < catalog.count; i++)
+		{
+			float sx, sy, sz;
+			astro_radec_to_unit(catalog.items[i].ra_hours,
+								catalog.items[i].dec_deg,
+								&sx, &sy, &sz);
+
+			int px, py;
+			float depth;
+
+			if (astro_project_dir(sx, sy, sz,
+								rx, ry, rz,
+								ux, uy, uz,
+								fx, fy, fz,
+								W, H, FOV,
+								&px, &py, &depth))
+			{
+				SDL_RenderDrawPoint(ren, px, py);
+			}
+		}
 
 		// draw stars
 		for (int i = 0; i < STAR_COUNT; i++)
@@ -272,7 +306,7 @@ int main(void)
 			vec3 v = STARS[i];
 
 			// rotate star field by current orientation
-			vec3 vr = v;
+			vec3 vr = rot_yaw_pitch_roll(v, yaw, pitch, roll);
 
 			int sx, sy;
 			if (project_to_screen(vr, W, H, &sx, &sy))
@@ -300,13 +334,15 @@ int main(void)
 	}
 
 	// Cleanup resources.
+
+	stars_free(&catalog);
+	imu_close();
+
 	TTF_CloseFont(font);
 	SDL_DestroyRenderer(ren);
 	SDL_DestroyWindow(w);
 	TTF_Quit();
 	SDL_Quit();
 
-	imu_close();
-	stars_free(&catalog);
 	return 0;
 }
