@@ -4,9 +4,118 @@
 #include <math.h>
 #include <time.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include "imu.h"
 #include "stars.h"
 #include "astro.h"
+
+static void renderText(SDL_Renderer* ren, TTF_Font* font, const char* msg, int x, int y);
+static void draw_horizon(SDL_Renderer *ren,
+                         float rx, float ry, float rz,
+                         float ux, float uy, float uz,
+                         float fx, float fy, float fz,
+                         int W, int H, float FOV);
+static void draw_cardinals(SDL_Renderer *ren, TTF_Font *font,
+                           float rx, float ry, float rz,
+                           float ux, float uy, float uz,
+                           float fx, float fy, float fz,
+                           int W, int H, float FOV);
+static int project_altaz(float alt_deg, float az_deg,
+                         float rx, float ry, float rz,
+                         float ux, float uy, float uz,
+                         float fx, float fy, float fz,
+                         int W, int H, float FOV,
+                         int *outx, int *outy)
+{
+	float x, y, z;
+	astro_altaz_to_unit(alt_deg, az_deg, &x, &y, &z);
+
+	return astro_project_dir(x, y, z,
+                            rx, ry, rz,
+                            ux, uy, uz,
+                            fx, fy, fz,
+                            W, H, FOV,
+                            outx, outy, NULL);
+}
+
+static void draw_horizon(SDL_Renderer *ren,
+                         float rx, float ry, float rz,
+                         float ux, float uy, float uz,
+                         float fx, float fy, float fz,
+                         int W, int H, float FOV)
+{
+	  // Draw horizon as a polyline by sampling azimuth around 0..360
+    const float ALT = 0.0f;     // horizon
+    const float STEP = 2.0f;    // degrees per segment (smoothness vs cost)
+
+    int prev_ok = 0;
+    int px0 = 0, py0 = 0;
+
+    for (float az = 0.0f; az <= 360.0f; az += STEP)
+    {
+        int px, py;
+        int ok = project_altaz(ALT, az,
+                               rx, ry, rz,
+                               ux, uy, uz,
+                               fx, fy, fz,
+                               W, H, FOV,
+                               &px, &py);
+
+        if (ok && prev_ok)
+        {
+            SDL_RenderDrawLine(ren, px0, py0, px, py);
+        }
+
+        prev_ok = ok;
+        px0 = px;
+        py0 = py;
+    }
+}
+
+static void draw_cardinals(SDL_Renderer *ren, TTF_Font *font,
+                           float rx, float ry, float rz,
+                           float ux, float uy, float uz,
+                           float fx, float fy, float fz,
+                           int W, int H, float FOV)
+{
+    // Slightly above horizon so labels are visible
+    const float ALT_LABEL = 5.0f;
+
+    struct { const char *txt; float az; } marks[] = {
+        {"N", 0.0f},
+        {"E", 90.0f},
+        {"S", 180.0f},
+        {"W", 270.0f}
+    };
+
+    for (size_t i = 0; i < sizeof(marks)/sizeof(marks[0]); i++)
+    {
+        int x, y;
+        if (project_altaz(ALT_LABEL, marks[i].az,
+                          rx, ry, rz,
+                          ux, uy, uz,
+                          fx, fy, fz,
+                          W, H, FOV,
+                          &x, &y))
+        {
+            renderText(ren, font, marks[i].txt, x - 8, y - 8);
+        }
+    }
+
+    // Optional: Zenith marker ("UP") at alt=90 (always useful)
+    {
+        int x, y;
+        if (project_altaz(90.0f, 0.0f,
+                          rx, ry, rz,
+                          ux, uy, uz,
+                          fx, fy, fz,
+                          W, H, FOV,
+                          &x, &y))
+        {
+            renderText(ren, font, "UP", x - 16, y - 12);
+        }
+    }
+}
 
 static double get_jd_utc_now(void)
 {
@@ -319,8 +428,13 @@ int main(void)
 		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
-		SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+		SDL_SetRenderDrawColor(ren, 120, 120, 120, 255);
+		draw_horizon(ren, rx, ry, rz, ux, uy, uz, fx, fy, fz, W, H, FOV);
 
+		SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+		draw_cardinals(ren, font, rx, ry, rz, ux, uy, uz, fx, fy, fz, W, H, FOV);
+		SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+		
 		for (size_t i = 0; i < catalog.count; i++)
 		{
 			if (!cache_vis[i])

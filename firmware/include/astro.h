@@ -22,4 +22,17 @@ int astro_project_dir(float dirx, float diry, float dirz,
                         int w, int h, float fov_deg, 
                         int *outx, int *outy, float *out_depth);
 
+// NEW: time helpers + local sky conversion
+double astro_julian_date_utc(int year, int month, int day, int hour, int min, double sec);
+double astro_gmst_hours(double jd_utc);
+double astro_lst_hours(double jd_utc, double lon_deg);
+
+// NEW: RA/Dec -> Alt/Az (degrees)
+void astro_radec_to_altaz(float ra_hours, float dec_deg,
+                          double jd_utc, double lat_deg, double lon_deg,
+                          float *out_alt_deg, float *out_az_deg);
+
+// NEW: Alt/Az -> local unit vector (ENU-ish)
+void astro_altaz_to_unit(float alt_deg, float az_deg, float *x, float *y, float *z);
+
 #endif
