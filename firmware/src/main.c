@@ -5,6 +5,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <limits.h>
 #include "imu.h"
 #include "stars.h"
 #include "astro.h"
@@ -115,6 +116,17 @@ static void draw_cardinals(SDL_Renderer *ren, TTF_Font *font,
             renderText(ren, font, "UP", x - 16, y - 12);
         }
     }
+}
+
+static void unit_to_altaz(float x, float y, float z, float *alt_deg, float *az_deg)
+{
+    // Input is ENU: x=East, y=North, z=Up
+    float alt = asinf(z);				// radians
+    float az  = atan2f(x, y);			// radians (east, north)
+    if (az < 0) az += 2.0f * (float)M_PI;
+
+    if (alt_deg) *alt_deg = alt * 180.0f / (float)M_PI;
+    if (az_deg)  *az_deg  = az  * 180.0f / (float)M_PI;
 }
 
 static double get_jd_utc_now(void)
@@ -331,6 +343,12 @@ int main(void)
 
 	while (running)	// Main application loop
 	{
+		int best_i = -1;
+		int best_dist2 = INT_MAX;
+		const int cx = W / 2;
+		const int cy = H / 2;
+		const int pick_radius_px = 35;
+		const int pick_radius2 = pick_radius_px * pick_radius_px;
 		// Handles user input and window events.
 		while (SDL_PollEvent(&e))
 		{
@@ -377,6 +395,9 @@ int main(void)
 						&rx, &ry, &rz,
 						&ux, &uy, &uz,
 						&fx, &fy, &fz);
+
+		float aim_alt, aim_az;
+		unit_to_altaz(fx, fy, fz, &aim_alt, &aim_az);
 
 		static Uint32 lastCacheMs = 0;
 		static double jd = 0;
@@ -428,6 +449,7 @@ int main(void)
 		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
+
 		SDL_SetRenderDrawColor(ren, 120, 120, 120, 255);
 		draw_horizon(ren, rx, ry, rz, ux, uy, uz, fx, fy, fz, W, H, FOV);
 
@@ -454,6 +476,16 @@ int main(void)
 				continue;
 			}
 
+			int dx = px - cx;
+			int dy = py - cy;
+			int dist2 = dx*dx + dy*dy;
+
+			if (dist2 < best_dist2)
+			{
+				best_dist2 = dist2;
+				best_i = (int)i;
+			}
+
 			int r = (int)cache_rad[i];
 			if (r <= 0)
 			{
@@ -470,7 +502,20 @@ int main(void)
 				}
 			}
 		}
-	
+
+		if (best_i >= 0 && best_dist2 <= pick_radius2)
+		{
+			char starbuf[128];
+			snprintf(starbuf, sizeof(starbuf), "Target: %s  Mag: %.1f",
+					catalog.items[best_i].name,
+					catalog.items[best_i].mag);
+			renderText(ren, font, starbuf, 20, 50);
+		}
+		else
+		{
+			renderText(ren, font, "Target: (none)", 20, 50);
+		}
+
 		// Crosshair centered on screen.
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
 		SDL_RenderDrawLine(ren, 400 - 40, 240, 400 + 40, 240);
@@ -479,8 +524,8 @@ int main(void)
 		// Diagnostic overlay.
 		char buf[128];
 		snprintf(buf, sizeof(buf),
-        		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f  FPS: %.1f  MODE:%s Stars:%zu",
-         		yaw, pitch, roll, fps, (force_sim || !imu_ok) ? "SIM" : "IMU", catalog.count);
+        		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f Aim Alt: %.1f Aim Az: %.1f FPS: %.1f",
+         		yaw, pitch, roll, aim_alt, aim_az, fps);
 
 		renderText(ren, font, buf, 20, 20);
 
