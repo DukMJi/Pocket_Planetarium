@@ -10,61 +10,25 @@ typedef struct {
 	float x, y, z;
 }vec3;
 
-static vec3 rot_yaw_pitch_roll(vec3 v, float yaw_deg, float pitch_deg, float roll_deg)
+static int mag_to_radius(float mag)
 {
-    float yaw   = yaw_deg   * (float)M_PI / 180.0f;
-    float pitch = pitch_deg * (float)M_PI / 180.0f;
-    float roll  = roll_deg  * (float)M_PI / 180.0f;
-
-    // Yaw (Z axis)
-    float cy = cosf(yaw), sy = sinf(yaw);
-    float x1 = v.x * cy - v.y * sy;
-    float y1 = v.x * sy + v.y * cy;
-    float z1 = v.z;
-
-    // Pitch (X axis)
-    float cp = cosf(pitch), sp = sinf(pitch);
-    float x2 = x1;
-    float y2 = y1 * cp - z1 * sp;
-    float z2 = y1 * sp + z1 * cp;
-
-    // Roll (Y axis)
-    float cr = cosf(roll), sr = sinf(roll);
-    float x3 = x2 * cr + z2 * sr;
-    float y3 = y2;
-    float z3 = -x2 * sr + z2 * cr;
-
-    vec3 out = { x3, y3, z3 };
-    return out;
-}
-
-static int project_to_screen(vec3 v, int w, int h, int *sx, int *sy)
-{
-	// Only draw things "in front" of the camera
-	if (v.z <= 0.05f)
+	if (mag <= 1.0f)	// very bright
 	{
-		return 0;
+		return 3;
 	}
 
-	float fov = 1.0f;
-	float px = (v.x / v.z) * fov;
-	float py = (v.y / v.z) * fov;
+	if (mag <= 2.5f)	// bright
+	{
+		return 2;
+	}
 
-	*sx = (int)(w * 0.5f + px * (w * 0.5f));
-	*sy = (int)(h * 0.5f - py * (h * 0.5f));
-	return 1;
+	if (mag <= 4.0f)	// medium
+	{
+		return 1;
+	}
 
+	return 0;			// faint
 }
-
-static const vec3 STARS[] = {
-    { 0.2f,  0.1f,  1.0f},
-    {-0.3f,  0.2f,  1.2f},
-    { 0.1f, -0.4f,  1.1f},
-    { 0.6f, -0.1f,  1.5f},
-    {-0.5f, -0.3f,  1.4f},
-    { 0.0f,  0.5f,  1.3f},
-};
-static const int STAR_COUNT = (int)(sizeof(STARS)/sizeof(STARS[0]));
 
 /*
  * Helper Function to render ASCII text to SDL renderer using SDL_tff.
@@ -190,6 +154,7 @@ int main(void)
 
 	printf("Loaded %zu stars\n", catalog.count);
 
+	float mag_cutoff = 5.5f;
 	// Tries to initialize the IMU once.
 	// If it fails, fall back to SIM mode automatically.
 	int imu_ok = (imu_init() == 0);
@@ -281,38 +246,48 @@ int main(void)
 
 		for (size_t i = 0; i < catalog.count; i++)
 		{
+			// 1) Cull dim stars early
+			float mag = catalog.items[i].mag;
+			if (mag > mag_cutoff)
+			{
+				continue;
+			}
+
+			// 2) Convert RA/Dec to unit direction
 			float sx, sy, sz;
 			astro_radec_to_unit(catalog.items[i].ra_hours,
 								catalog.items[i].dec_deg,
 								&sx, &sy, &sz);
 
+			// 3) Project to screen using current camera basis
 			int px, py;
 			float depth;
-
-			if (astro_project_dir(sx, sy, sz,
+			if (!astro_project_dir(sx, sy, sz,
 								rx, ry, rz,
 								ux, uy, uz,
 								fx, fy, fz,
 								W, H, FOV,
 								&px, &py, &depth))
 			{
+				continue;
+			}
+
+			// 4) Draw stars with size based on magnitude
+			int r = mag_to_radius(mag);
+
+			if (r <= 0)
+			{
 				SDL_RenderDrawPoint(ren, px, py);
 			}
-		}
-
-		// draw stars
-		for (int i = 0; i < STAR_COUNT; i++)
-		{
-			vec3 v = STARS[i];
-
-			// rotate star field by current orientation
-			vec3 vr = rot_yaw_pitch_roll(v, yaw, pitch, roll);
-
-			int sx, sy;
-			if (project_to_screen(vr, W, H, &sx, &sy))
+			else
 			{
-				// Simple point
-				SDL_RenderDrawPoint(ren, sx, sy);
+				for (int dy = -r; dy <= r; dy++)
+				{
+					for (int dx = -r; dx <= r; dx++)
+					{
+						SDL_RenderDrawPoint(ren, px + dx, py + dy);
+					}
+				}
 			}
 		}
 
