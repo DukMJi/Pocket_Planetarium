@@ -1,14 +1,25 @@
 #include <stdio.h>
 #include <SDL.h>
 #include <SDL_ttf.h>
-#include "imu.h"
 #include <math.h>
+#include <time.h>
+#include <stdlib.h>
+#include "imu.h"
 #include "stars.h"
 #include "astro.h"
 
-typedef struct {
-	float x, y, z;
-}vec3;
+static double get_jd_utc_now(void)
+{
+	time_t t = time(NULL);
+	struct tm g;
+#if defined(_WIN32)
+	gmtime_s(&g, &t);
+#else
+	g = *gmtime(&t);
+#endif
+	return astro_julian_date_utc(g.tm_year + 1900, g.tm_mon + 1, g.tm_mday,
+								g.tm_hour, g.tm_min, (double)g.tm_sec);
+}
 
 static int mag_to_radius(float mag)
 {
@@ -154,6 +165,31 @@ int main(void)
 
 	printf("Loaded %zu stars\n", catalog.count);
 
+	float *cache_lx = (float*)malloc(sizeof(float) * catalog.count);
+	float *cache_ly = (float*)malloc(sizeof(float) * catalog.count);
+	float *cache_lz = (float*)malloc(sizeof(float) * catalog.count);
+	unsigned char *cache_vis = (unsigned char*)malloc(sizeof(unsigned char) * catalog.count);
+	unsigned char *cache_rad = (unsigned char*)malloc(sizeof(unsigned char) * catalog.count);
+
+	if (!cache_lx || !cache_ly || !cache_lz || !cache_vis || !cache_rad)
+	{
+		fprintf(stderr, "Failed to allocate star cache arrays\n");
+
+		free(cache_lx);
+		free(cache_ly);
+		free(cache_lz);
+		free(cache_vis);
+		free(cache_rad);
+
+		stars_free(&catalog);
+		TTF_CloseFont(font);
+		SDL_DestroyRenderer(ren);
+		SDL_DestroyWindow(w);
+		TTF_Quit();
+		SDL_Quit();
+		return 1;
+	}
+
 	float mag_cutoff = 5.5f;
 	// Tries to initialize the IMU once.
 	// If it fails, fall back to SIM mode automatically.
@@ -177,6 +213,13 @@ int main(void)
 	int running = 1;
 
 	imu_data_t imu;
+
+	const int W = 800;
+	const int H = 480;
+	const float FOV = 70.0f;
+	const double LAT_DEG = 32.7357;
+	const double LON_DEG = -97.1081;
+
 	while (running)	// Main application loop
 	{
 		// Handles user input and window events.
@@ -226,6 +269,44 @@ int main(void)
 						&ux, &uy, &uz,
 						&fx, &fy, &fz);
 
+		static Uint32 lastCacheMs = 0;
+		static double jd = 0;
+
+		if (jd == 0 || now - lastCacheMs > 1000)
+		{
+			jd = get_jd_utc_now();
+			lastCacheMs = now;
+
+			// TODO: replace with GPS later
+			for (size_t i = 0; i < catalog.count; i++)
+			{
+				float mag = catalog.items[i].mag;
+
+				// dim stars early
+				if (mag > mag_cutoff)
+				{
+					cache_vis[i] = 0;
+					continue;
+				}
+
+				float alt_deg, az_deg;
+				astro_radec_to_altaz(catalog.items[i].ra_hours,
+									catalog.items[i].dec_deg,
+									jd, LAT_DEG, LON_DEG,
+									&alt_deg, &az_deg);
+
+				if (alt_deg < 0.0f)
+				{
+					cache_vis[i] = 0;
+					continue;
+				}
+
+				astro_altaz_to_unit(alt_deg, az_deg, &cache_lx[i], &cache_ly[i], &cache_lz[i]);
+				cache_vis[i] = 1;
+				cache_rad[i] = (unsigned char)mag_to_radius(mag);
+			}
+		}
+
 		// FPS calculated
 		frames++;
 		if (now - fpsLast >= 500)
@@ -238,43 +319,28 @@ int main(void)
 		// Rendering phase.
 		SDL_SetRenderDrawColor(ren, 10, 10, 40, 255);
 		SDL_RenderClear(ren);
-
-		const int W = 800;
-		const int H = 480;
-		const float FOV = 70.0f;
 		SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
 
 		for (size_t i = 0; i < catalog.count; i++)
 		{
-			// 1) Cull dim stars early
-			float mag = catalog.items[i].mag;
-			if (mag > mag_cutoff)
+			if (!cache_vis[i])
 			{
 				continue;
 			}
 
-			// 2) Convert RA/Dec to unit direction
-			float sx, sy, sz;
-			astro_radec_to_unit(catalog.items[i].ra_hours,
-								catalog.items[i].dec_deg,
-								&sx, &sy, &sz);
-
-			// 3) Project to screen using current camera basis
 			int px, py;
-			float depth;
-			if (!astro_project_dir(sx, sy, sz,
-								rx, ry, rz,
-								ux, uy, uz,
-								fx, fy, fz,
-								W, H, FOV,
-								&px, &py, &depth))
+
+			if (!astro_project_dir(cache_lx[i], cache_ly[i], cache_lz[i],
+						rx, ry, rz,
+						ux, uy, uz,
+						fx, fy, fz,
+						W, H, FOV,
+						&px, &py, NULL))
 			{
 				continue;
 			}
 
-			// 4) Draw stars with size based on magnitude
-			int r = mag_to_radius(mag);
-
+			int r = (int)cache_rad[i];
 			if (r <= 0)
 			{
 				SDL_RenderDrawPoint(ren, px, py);
@@ -290,7 +356,7 @@ int main(void)
 				}
 			}
 		}
-
+	
 		// Crosshair centered on screen.
 		SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
 		SDL_RenderDrawLine(ren, 400 - 40, 240, 400 + 40, 240);
@@ -309,6 +375,11 @@ int main(void)
 	}
 
 	// Cleanup resources.
+	free(cache_lx);
+	free(cache_ly);
+	free(cache_lz);
+	free(cache_vis);
+	free(cache_rad);
 
 	stars_free(&catalog);
 	imu_close();
