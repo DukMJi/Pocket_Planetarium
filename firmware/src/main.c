@@ -117,6 +117,56 @@ static void draw_cardinals(SDL_Renderer *ren, TTF_Font *font,
     }
 }
 
+static float wrap_deg_360(float a)
+{
+	while (a < 0.0f)
+	{
+		a += 360.0f;
+	}
+	while (a >= 360.0f)
+	{
+		a -= 360.0f;
+	}
+	return a;
+}
+
+// Returns the signed smallest difference a-b in degrees, range (-180, +180)
+static float angle_diff_deg(float a, float b)
+{
+	float d = a - b;
+	while (d > 180.0f)
+	{
+		d -= 360.0f;
+	}
+	while (d < -180.0f)
+	{
+		d += 360.0f;
+	}
+	return d;
+}
+
+
+// Exponential smoothing that is dt-correct (time-constant based)
+static float smooth_exp(float current, float target, float dt, float tau)
+{
+	// tau: smaller = snappy, larger = smoother
+	if (tau <= 0.0001f)
+	{
+		return target;
+	}
+
+	float alpha = 1.0f - expf(-dt / tau);
+	return current + alpha * (target-current);
+}
+
+// Wrap-safe yaw smoothing
+static float smooth_yaw(float yaw_smooth, float yaw_raw, float dt, float tau)
+{
+	float d = angle_diff_deg(yaw_raw, yaw_smooth);
+	float yaw_target = yaw_smooth + d;
+	return wrap_deg_360(smooth_exp(yaw_smooth, yaw_target, dt, tau));
+}
+
 static double get_jd_utc_now(void)
 {
 	time_t t = time(NULL);
@@ -299,6 +349,22 @@ int main(void)
 		return 1;
 	}
 
+	static int smooth_init = 0;
+	static float yaw_s = 0.0f;
+	static float pitch_s = 0.0f;
+	static float roll_s = 0.0f;
+
+	static float yaw_off = 0.0f;
+	static float pitch_off = 0.0f;
+	static float roll_off = 0.0f;
+
+	static int cal_done = 0;
+	static float cal_sum_yaw = 0.0f;
+	static float cal_sum_pitch = 0.0f;
+	static float cal_sum_roll = 0.0f;
+	static int cal_count = 0;
+	static Uint32 cal_start_ms = 0;
+
 	float mag_cutoff = 5.5f;
 	// Tries to initialize the IMU once.
 	// If it fails, fall back to SIM mode automatically.
@@ -372,8 +438,60 @@ int main(void)
 			roll = imu.roll;
 		}
 
+		if (!cal_done)
+		{
+			if (cal_start_ms == 0)
+			{
+				cal_start_ms = now;
+				cal_sum_yaw = 0.0f;
+    			cal_sum_pitch = 0.0f;
+    			cal_sum_roll = 0.0f;
+    			cal_count = 0;
+			}
+
+			cal_sum_yaw += wrap_deg_360(yaw);
+			cal_sum_pitch += pitch;
+			cal_sum_roll += roll;
+			cal_count++;
+
+			if (now - cal_start_ms >= 2000 && cal_count > 0)
+			{
+				float avg_yaw = cal_sum_yaw / (float)cal_count;
+				float avg_pitch = cal_sum_pitch / (float)cal_count;
+				float avg_roll= cal_sum_roll / (float)cal_count;
+
+				yaw_off = avg_yaw;
+				pitch_off = avg_pitch;
+				roll_off = avg_roll;
+
+				cal_done = 1;
+
+				smooth_init = 0;
+			}
+		}
+
+		yaw = wrap_deg_360(yaw - yaw_off);
+		pitch = pitch - pitch_off;
+		roll = roll - roll_off;
+
+		if (!smooth_init)
+		{
+			yaw_s = wrap_deg_360(yaw);
+			pitch_s = pitch;
+			roll_s = roll;
+			smooth_init = 1;
+		}
+
+		const float TAU_YAW = 0.10f;
+		const float TAU_PITCH = 0.08f;
+		const float TAU_ROLL = 0.08f;
+
+		yaw_s = smooth_yaw(yaw_s, yaw, dt, TAU_YAW);
+		pitch_s = smooth_exp(pitch_s, pitch, dt, TAU_PITCH);
+		roll_s = smooth_exp(roll_s, roll, dt, TAU_ROLL);
+
 		float rx, ry, rz, ux, uy, uz, fx, fy, fz;
-		astro_camera_basis(yaw, pitch, roll,
+		astro_camera_basis(yaw_s, pitch_s, roll_s,
 						&rx, &ry, &rz,
 						&ux, &uy, &uz,
 						&fx, &fy, &fz);
@@ -403,6 +521,12 @@ int main(void)
 									catalog.items[i].dec_deg,
 									jd, LAT_DEG, LON_DEG,
 									&alt_deg, &az_deg);
+
+				if (alt_deg < 0.0f)
+				{
+					cache_vis[i] = 0;
+					continue;
+				}
 
 				astro_altaz_to_unit(alt_deg, az_deg, &cache_lx[i], &cache_ly[i], &cache_lz[i]);
 				cache_vis[i] = 1;
@@ -475,7 +599,7 @@ int main(void)
 		char buf[128];
 		snprintf(buf, sizeof(buf),
         		"Yaw: %.1f  Pitch: %.1f  Roll: %.1f FPS: %.1f",
-         		yaw, pitch, roll, fps);
+         		yaw_s, pitch_s, roll_s, fps);
 
 		renderText(ren, font, buf, 20, 20);
 
